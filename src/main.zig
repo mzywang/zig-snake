@@ -1,5 +1,5 @@
 const std = @import("std");
-const types = @import("model.zig");
+const model = @import("model.zig");
 const event = @import("event.zig");
 const app = @import("app.zig");
 
@@ -9,7 +9,7 @@ pub fn main(init: std.process.Init) !void {
     const original_termios = try app.AppUtils.enterRawMode();
     defer app.AppUtils.exitRawMode(original_termios);
 
-    var app_session: app.AppUtils.Session = .{ .model = types.ModelUtils.initializeModel(app.AppUtils.queryBoardSize()), .stdout = .{} };
+    var app_session: app.AppUtils.Session = .{ .model = model.ModelUtils.initializeModel(app.AppUtils.queryBoardSize()), .stdout = .{} };
     const stdout_writer = app_session.stdout.setup(init.io);
 
     try app.AppUtils.enterAlternateScreen(stdout_writer);
@@ -23,7 +23,7 @@ pub fn main(init: std.process.Init) !void {
 
     while (true) {
         const action = channel.recv(init.io);
-        app_session.model = types.ModelUtils.updateModel(app_session.model, action);
+        app_session.model = model.ModelUtils.updateModel(app_session.model, action);
 
         const should_quit = try app.AppUtils.handleBeforeHook(stdout_writer, action, original_termios);
         if (should_quit) break;
