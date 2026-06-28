@@ -69,6 +69,29 @@ pub const EventHandlerUtils = struct {
         return elapsed_ms;
     }
 
+    fn directionFromKeys(buf: []const u8) ?model.Direction {
+        var i: usize = 0;
+        while (i < buf.len) : (i += 1) {
+            switch (buf[i]) {
+                'w', 'W' => return .up,
+                's', 'S' => return .down,
+                'a', 'A' => return .left,
+                'd', 'D' => return .right,
+                0x1b => if (i + 2 < buf.len and buf[i + 1] == '[') {
+                    switch (buf[i + 2]) {
+                        'A' => return .up,
+                        'B' => return .down,
+                        'C' => return .right,
+                        'D' => return .left,
+                        else => {},
+                    }
+                },
+                else => {},
+            }
+        }
+        return null;
+    }
+
     fn pollForStdin(channel: *EventChannel, io: std.Io, timeout_ms: i32) void {
         var fds = [_]std.posix.pollfd{.{
             .fd = std.posix.STDIN_FILENO,
@@ -84,7 +107,12 @@ pub const EventHandlerUtils = struct {
 
         const ctrl_c = 0x03;
         const has_ctrl_c = std.mem.indexOfScalar(u8, buf[0..len], ctrl_c) != null;
-        channel.send(io, if (has_ctrl_c) .quit else .key_pressed);
+        if (has_ctrl_c) {
+            channel.send(io, .quit);
+            return;
+        }
+
+        channel.send(io, .{ .key_pressed = directionFromKeys(buf[0..len]) });
     }
 
     pub fn registerEventHandler(

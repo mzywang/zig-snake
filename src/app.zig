@@ -68,20 +68,20 @@ pub const AppUtils = struct {
         };
     }
 
-    pub fn drawBoard(writer: *std.Io.Writer, model: model.Model) !void {
-        if (model.mode == .START) return drawStartScreen(writer, model);
-        return drawPlayingBoard(writer, model);
+    pub fn drawBoard(writer: *std.Io.Writer, m: model.Model) !void {
+        if (m.mode == .START) return drawStartScreen(writer, m);
+        return drawPlayingBoard(writer, m);
     }
 
-    fn drawPlayingBoard(writer: *std.Io.Writer, model: model.Model) !void {
+    fn drawPlayingBoard(writer: *std.Io.Writer, m: model.Model) !void {
         try writer.writeAll("\x1b[H");
-        const dot_col = 1 + model.dot_col;
-        const dot_row = 1;
-        const last_row = model.board_height + 1;
-        const last_col = model.board_width + 1;
+        const dot_col = 1 + m.dot_col;
+        const dot_row = 1 + m.dot_row;
+        const last_row = m.board_height + 1;
+        const last_col = m.board_width + 1;
 
-        for (0..model.board_height + 2) |row| {
-            for (0..model.board_width + 2) |col| {
+        for (0..m.board_height + 2) |row| {
+            for (0..m.board_width + 2) |col| {
                 const is_dot = row == dot_row and col == dot_col;
 
                 if (row == 0 or row == last_row or col == 0 or col == last_col) {
@@ -113,18 +113,18 @@ pub const AppUtils = struct {
         return "║";
     }
 
-    fn drawStartScreen(writer: *std.Io.Writer, model: model.Model) !void {
+    fn drawStartScreen(writer: *std.Io.Writer, m: model.Model) !void {
         try writer.writeAll("\x1b[H");
 
         const message = "Press any key to start";
         const box_height = 3;
         const box_width = message.len + 4;
-        const total_rows = model.board_height + 2;
-        const total_cols = model.board_width + 2;
+        const total_rows = m.board_height + 2;
+        const total_cols = m.board_width + 2;
         const shadow_offset = 1;
 
-        const box_top = 1 + (model.board_height -| box_height) / 2;
-        const box_left = 1 + (model.board_width -| box_width) / 2;
+        const box_top = 1 + (m.board_height -| box_height) / 2;
+        const box_left = 1 + (m.board_width -| box_width) / 2;
         const last_row = total_rows - 1;
         const last_col = total_cols - 1;
 
