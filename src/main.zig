@@ -37,7 +37,7 @@ pub fn main(init: std.process.Init) !void {
             break;
         }
 
-        const beforeHook = if (action == .resized) .CLEAR else .NO_OP;
+        const beforeHook: display.BeforeHook = if (action == .resized) .CLEAR else .NO_OP;
         try DisplayUtils.drawBoard(stdout_writer, model, beforeHook);
     }
 }
