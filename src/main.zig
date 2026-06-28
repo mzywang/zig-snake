@@ -112,10 +112,19 @@ fn queryBoardSize() struct { width: usize, height: usize } {
 }
 
 fn eventHandler(channel: *EventChannel, io: Io) void {
+    var last_tick: Io.Clock.Timestamp = .now(io, .awake);
+
     while (true) {
         if (resize_requested.swap(false, .monotonic)) {
             const size = queryBoardSize();
             channel.send(io, .{ .resized = .{ .width = size.width, .height = size.height } });
+        }
+
+        const elapsed_ms = last_tick.untilNow(io).raw.toMilliseconds();
+        if (elapsed_ms >= tick_rate_ms) {
+            channel.send(io, .tick);
+            last_tick = .now(io, .awake);
+            continue;
         }
 
         var fds = [_]posix.pollfd{.{
@@ -123,13 +132,15 @@ fn eventHandler(channel: *EventChannel, io: Io) void {
             .events = posix.POLL.IN,
             .revents = 0,
         }};
-        const n = posix.poll(&fds, tick_rate_ms) catch 0;
+        const timeout_ms: i32 = @intCast(tick_rate_ms - elapsed_ms);
+        const n = posix.poll(&fds, timeout_ms) catch 0;
         if (n > 0) {
-            var byte: [1]u8 = undefined;
-            _ = posix.read(posix.STDIN_FILENO, &byte) catch {};
-            channel.send(io, if (byte[0] == ctrl_c) .quit else .key_pressed);
-        } else {
-            channel.send(io, .tick);
+            var buf: [64]u8 = undefined;
+            const len = posix.read(posix.STDIN_FILENO, &buf) catch 0;
+            if (len > 0) {
+                const has_ctrl_c = std.mem.indexOfScalar(u8, buf[0..len], ctrl_c) != null;
+                channel.send(io, if (has_ctrl_c) .quit else .key_pressed);
+            }
         }
     }
 }
