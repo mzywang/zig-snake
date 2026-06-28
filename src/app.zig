@@ -32,12 +32,12 @@ pub const AppUtils = struct {
     };
 
     pub fn enterAlternateScreen(writer: *std.Io.Writer) !void {
-        try writer.writeAll("\x1b[?1049h\x1b[2J");
+        try writer.writeAll("\x1b[?1049h\x1b[2J\x1b[?25l");
         try writer.flush();
     }
 
     pub fn exitAlternateScreen(writer: *std.Io.Writer) void {
-        writer.writeAll("\x1b[?1049l") catch {};
+        writer.writeAll("\x1b[?25h\x1b[?1049l") catch {};
         writer.flush() catch {};
     }
 
@@ -70,22 +70,47 @@ pub const AppUtils = struct {
 
     pub fn drawBoard(writer: *std.Io.Writer, model: types.Model) !void {
         if (model.mode == .START) return drawStartScreen(writer, model);
+        return drawPlayingBoard(writer, model);
+    }
 
+    fn drawPlayingBoard(writer: *std.Io.Writer, model: types.Model) !void {
         try writer.writeAll("\x1b[H");
         const dot_col = 1 + model.dot_col;
         const dot_row = 1;
+        const last_row = model.board_height + 1;
+        const last_col = model.board_width + 1;
 
         for (0..model.board_height + 2) |row| {
             for (0..model.board_width + 2) |col| {
-                const is_border = row == 0 or row == model.board_height + 1 or
-                    col == 0 or col == model.board_width + 1;
                 const is_dot = row == dot_row and col == dot_col;
-                try writer.writeByte(if (is_border) '#' else if (is_dot) '*' else '.');
+
+                if (row == 0 or row == last_row or col == 0 or col == last_col) {
+                    try borderColor(writer, borderGlyph(row, col, last_row, last_col));
+                } else if (is_dot) {
+                    try writer.writeAll("\x1b[32;1m\u{2588}\x1b[0m");
+                } else {
+                    try writer.writeAll("\x1b[2m\u{00b7}\x1b[0m");
+                }
             }
-            if (row != model.board_height + 1) try writer.writeByte('\n');
+            if (row != last_row) try writer.writeByte('\n');
         }
 
         try writer.flush();
+    }
+
+    fn borderColor(writer: *std.Io.Writer, glyph: []const u8) !void {
+        try writer.writeAll("\x1b[36;1m");
+        try writer.writeAll(glyph);
+        try writer.writeAll("\x1b[0m");
+    }
+
+    fn borderGlyph(row: usize, col: usize, last_row: usize, last_col: usize) []const u8 {
+        if (row == 0 and col == 0) return "╔";
+        if (row == 0 and col == last_col) return "╗";
+        if (row == last_row and col == 0) return "╚";
+        if (row == last_row and col == last_col) return "╝";
+        if (row == 0 or row == last_row) return "═";
+        return "║";
     }
 
     fn drawStartScreen(writer: *std.Io.Writer, model: types.Model) !void {
@@ -100,6 +125,8 @@ pub const AppUtils = struct {
 
         const box_top = 1 + (model.board_height -| box_height) / 2;
         const box_left = 1 + (model.board_width -| box_width) / 2;
+        const last_row = total_rows - 1;
+        const last_col = total_cols - 1;
 
         for (0..total_rows) |row| {
             for (0..total_cols) |col| {
@@ -124,7 +151,7 @@ pub const AppUtils = struct {
                 } else if (in_shadow) {
                     try writer.writeAll("\x1b[100m \x1b[0m");
                 } else if (is_border) {
-                    try writer.writeByte('#');
+                    try borderColor(writer, borderGlyph(row, col, last_row, last_col));
                 } else {
                     try writer.writeByte(' ');
                 }
