@@ -134,12 +134,14 @@ pub const AppUtils = struct {
         const message = "Press any key to start";
         const box_height = 3;
         const box_width = message.len + 4;
+        const cell_width = @max(1, @as(usize, @intFromFloat(@round(m.cell_aspect_ratio))));
+        const board_width = m.board_width * cell_width;
         const total_rows = m.board_height + 2;
-        const total_cols = m.board_width + 2;
+        const total_cols = board_width + 2;
         const shadow_offset = 1;
 
         const box_top = 1 + (m.board_height -| box_height) / 2;
-        const box_left = 1 + (m.board_width -| box_width) / 2;
+        const box_left = 1 + (board_width -| box_width) / 2;
         const last_row = total_rows - 1;
         const last_col = total_cols - 1;
 
