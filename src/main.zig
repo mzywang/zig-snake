@@ -2,8 +2,8 @@ const std = @import("std");
 const posix = std.posix;
 const Io = std.Io;
 
-const board_width = 20;
-const board_height = 10;
+const min_board_width = 10;
+const min_board_height = 4;
 const tick_rate_ms = 150;
 const ctrl_c = 0x03;
 
@@ -16,25 +16,43 @@ const Mode = enum {
 const Model = struct {
     mode: Mode,
     dot_col: usize, // 0..board_width, wraps around
+    board_width: usize,
+    board_height: usize,
 };
 
-const Action = enum {
+const Action = union(enum) {
     tick,
     key_pressed,
     quit,
+    resized: struct { width: usize, height: usize },
 };
 
 fn update(model: Model, action: Action) Model {
     return switch (action) {
         .tick => .{
             .mode = model.mode,
-            .dot_col = if (model.mode == .PLAYING) (model.dot_col + 1) % board_width else model.dot_col,
+            .dot_col = if (model.mode == .PLAYING) (model.dot_col + 1) % model.board_width else model.dot_col,
+            .board_width = model.board_width,
+            .board_height = model.board_height,
         },
         .key_pressed => .{
             .mode = if (model.mode == .START) .PLAYING else model.mode,
             .dot_col = model.dot_col,
+            .board_width = model.board_width,
+            .board_height = model.board_height,
         },
-        .quit => .{ .mode = .QUIT, .dot_col = model.dot_col },
+        .quit => .{
+            .mode = .QUIT,
+            .dot_col = model.dot_col,
+            .board_width = model.board_width,
+            .board_height = model.board_height,
+        },
+        .resized => |size| .{
+            .mode = model.mode,
+            .dot_col = model.dot_col % size.width,
+            .board_width = size.width,
+            .board_height = size.height,
+        },
     };
 }
 
@@ -69,8 +87,37 @@ const EventChannel = struct {
     }
 };
 
+/// Set by `handleSigWinch` (run on a signal, so it must stay minimal) and
+/// consumed by `eventHandler`, which does the actual work of querying the
+/// new size and sending it over the channel.
+var resize_requested: std.atomic.Value(bool) = .init(false);
+
+fn handleSigWinch(sig: posix.SIG, info: *const posix.siginfo_t, ctx_ptr: ?*anyopaque) callconv(.c) void {
+    _ = sig;
+    _ = info;
+    _ = ctx_ptr;
+    resize_requested.store(true, .monotonic);
+}
+
+/// Queries the current terminal dimensions via the TIOCGWINSZ ioctl,
+/// returning the interior board size (terminal size minus the border),
+/// clamped to a sane minimum.
+fn queryBoardSize() struct { width: usize, height: usize } {
+    var ws: posix.winsize = .{ .row = 0, .col = 0, .xpixel = 0, .ypixel = 0 };
+    _ = std.c.ioctl(posix.STDOUT_FILENO, @intCast(std.c.T.IOCGWINSZ), &ws);
+    return .{
+        .width = @max(min_board_width, @as(usize, ws.col) -| 2),
+        .height = @max(min_board_height, @as(usize, ws.row) -| 2),
+    };
+}
+
 fn eventHandler(channel: *EventChannel, io: Io) void {
     while (true) {
+        if (resize_requested.swap(false, .monotonic)) {
+            const size = queryBoardSize();
+            channel.send(io, .{ .resized = .{ .width = size.width, .height = size.height } });
+        }
+
         var fds = [_]posix.pollfd{.{
             .fd = posix.STDIN_FILENO,
             .events = posix.POLL.IN,
@@ -99,10 +146,23 @@ pub fn main(init: std.process.Init) !void {
 
     try stdout_writer.writeAll("\x1b[2J"); // clear the screen once at startup
 
+    const winch_action: posix.Sigaction = .{
+        .handler = .{ .sigaction = handleSigWinch },
+        .mask = posix.sigemptyset(),
+        .flags = (posix.SA.SIGINFO | posix.SA.RESTART),
+    };
+    posix.sigaction(.WINCH, &winch_action, null);
+
     var channel: EventChannel = .{};
     _ = try std.Thread.spawn(.{}, eventHandler, .{ &channel, io });
 
-    var model: Model = .{ .mode = .START, .dot_col = 0 };
+    const initial_size = queryBoardSize();
+    var model: Model = .{
+        .mode = .START,
+        .dot_col = 0,
+        .board_width = initial_size.width,
+        .board_height = initial_size.height,
+    };
     while (true) {
         const action = channel.recv(io);
         model = update(model, action);
@@ -112,6 +172,7 @@ pub fn main(init: std.process.Init) !void {
             break;
         }
 
+        if (action == .resized) try stdout_writer.writeAll("\x1b[2J"); // clear stale content around the resized board
         try drawBoard(stdout_writer, model);
     }
 }
@@ -134,10 +195,10 @@ fn drawBoard(writer: *Io.Writer, model: Model) !void {
     const dot_col = 1 + model.dot_col;
     const dot_row = 1;
 
-    for (0..board_height + 2) |row| {
-        for (0..board_width + 2) |col| {
-            const is_border = row == 0 or row == board_height + 1 or
-                col == 0 or col == board_width + 1;
+    for (0..model.board_height + 2) |row| {
+        for (0..model.board_width + 2) |col| {
+            const is_border = row == 0 or row == model.board_height + 1 or
+                col == 0 or col == model.board_width + 1;
             const is_dot = row == dot_row and col == dot_col;
             try writer.writeByte(if (is_border) '#' else if (is_dot) '*' else '.');
         }
