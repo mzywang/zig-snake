@@ -65,14 +65,7 @@ pub const ModelUtils = struct {
                 if (model.mode != .PLAYING) break :blk model;
 
                 const ticks_since_move = model.ticks_since_move + 1;
-                const horizontal_ticks_per_move = @max(1, 1000 / (blocks_per_second * @as(usize, @intCast(tick_rate_ms))));
-                const vertical_ticks_per_move = @max(1, @as(usize, @intFromFloat(@round(
-                    @as(f64, @floatFromInt(horizontal_ticks_per_move)) * model.cell_aspect_ratio,
-                ))));
-                const ticks_per_move = switch (model.direction) {
-                    .up, .down => vertical_ticks_per_move,
-                    .left, .right => horizontal_ticks_per_move,
-                };
+                const ticks_per_move = @max(1, 1000 / (blocks_per_second * @as(usize, @intCast(tick_rate_ms))));
                 if (ticks_since_move < ticks_per_move) break :blk .{
                     .mode = model.mode,
                     .dot_col = model.dot_col,
