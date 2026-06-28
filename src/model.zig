@@ -18,13 +18,19 @@ pub const Model = struct {
     direction: Direction,
     board_width: usize,
     board_height: usize,
+    cell_aspect_ratio: f64,
     ticks_since_move: usize,
 };
 
 pub const tick_rate_ms: i64 = 16;
 pub const blocks_per_second = 20;
+pub const default_cell_aspect_ratio: f64 = 2.0;
 
-pub const BoardSize = struct { width: usize, height: usize };
+pub const BoardSize = struct {
+    width: usize,
+    height: usize,
+    cell_aspect_ratio: f64 = default_cell_aspect_ratio,
+};
 
 pub const Action = union(enum) {
     tick,
@@ -42,6 +48,7 @@ pub const ModelUtils = struct {
             .direction = .right,
             .board_width = initial_size.width,
             .board_height = initial_size.height,
+            .cell_aspect_ratio = initial_size.cell_aspect_ratio,
             .ticks_since_move = 0,
         };
     }
@@ -58,7 +65,14 @@ pub const ModelUtils = struct {
                 if (model.mode != .PLAYING) break :blk model;
 
                 const ticks_since_move = model.ticks_since_move + 1;
-                const ticks_per_move = @max(1, 1000 / (blocks_per_second * @as(usize, @intCast(tick_rate_ms))));
+                const horizontal_ticks_per_move = @max(1, 1000 / (blocks_per_second * @as(usize, @intCast(tick_rate_ms))));
+                const vertical_ticks_per_move = @max(1, @as(usize, @intFromFloat(@round(
+                    @as(f64, @floatFromInt(horizontal_ticks_per_move)) * model.cell_aspect_ratio,
+                ))));
+                const ticks_per_move = switch (model.direction) {
+                    .up, .down => vertical_ticks_per_move,
+                    .left, .right => horizontal_ticks_per_move,
+                };
                 if (ticks_since_move < ticks_per_move) break :blk .{
                     .mode = model.mode,
                     .dot_col = model.dot_col,
@@ -66,6 +80,7 @@ pub const ModelUtils = struct {
                     .direction = model.direction,
                     .board_width = model.board_width,
                     .board_height = model.board_height,
+                    .cell_aspect_ratio = model.cell_aspect_ratio,
                     .ticks_since_move = ticks_since_move,
                 };
 
@@ -76,6 +91,7 @@ pub const ModelUtils = struct {
                     .direction = model.direction,
                     .board_width = model.board_width,
                     .board_height = model.board_height,
+                    .cell_aspect_ratio = model.cell_aspect_ratio,
                     .ticks_since_move = 0,
                 };
             },
@@ -86,6 +102,7 @@ pub const ModelUtils = struct {
                 .direction = direction orelse model.direction,
                 .board_width = model.board_width,
                 .board_height = model.board_height,
+                .cell_aspect_ratio = model.cell_aspect_ratio,
                 .ticks_since_move = model.ticks_since_move,
             },
             .quit => .{
@@ -95,6 +112,7 @@ pub const ModelUtils = struct {
                 .direction = model.direction,
                 .board_width = model.board_width,
                 .board_height = model.board_height,
+                .cell_aspect_ratio = model.cell_aspect_ratio,
                 .ticks_since_move = model.ticks_since_move,
             },
             .resized => |size| .{
@@ -104,6 +122,7 @@ pub const ModelUtils = struct {
                 .direction = model.direction,
                 .board_width = size.width,
                 .board_height = size.height,
+                .cell_aspect_ratio = size.cell_aspect_ratio,
                 .ticks_since_move = model.ticks_since_move,
             },
         };
