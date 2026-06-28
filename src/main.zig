@@ -1,46 +1,41 @@
 const std = @import("std");
 const types = @import("model.zig");
 const event = @import("event.zig");
-const EventHandlerUtils = event.EventHandlerUtils;
-const EventChannel = EventHandlerUtils.EventChannel;
-const display = @import("display.zig");
-const DisplayUtils = display.DisplayUtils;
+const app = @import("app.zig");
 
 pub var resize_requested: std.atomic.Value(bool) = .init(false);
-const tick_rate_ms = 150;
 
 pub fn main(init: std.process.Init) !void {
-    const original_termios = try DisplayUtils.enterRawMode();
-    defer DisplayUtils.exitRawMode(original_termios);
+    const original_termios = try app.AppUtils.enterRawMode();
+    defer app.AppUtils.exitRawMode(original_termios);
 
-    var stdout: Stdout = .{};
-    const io = init.io;
-    stdout.init(io);
-    const stdout_writer = stdout.writer();
+    var session: Session = .{ .model = types.ModelUtils.initializeModel(app.AppUtils.queryBoardSize()), .stdout = .{} };
+    const stdout_writer = session.stdout.setup(init.io);
 
-    try DisplayUtils.enterAlternateScreen(stdout_writer);
-    defer DisplayUtils.exitAlternateScreen(stdout_writer);
+    try app.AppUtils.enterAlternateScreen(stdout_writer);
+    defer app.AppUtils.exitAlternateScreen(stdout_writer);
 
-    const reigsterWindowChangeSignalHandler = EventHandlerUtils.makeWindowChangeRegistrar(&resize_requested);
+    const reigsterWindowChangeSignalHandler = event.EventHandlerUtils.makeWindowChangeRegistrar(&resize_requested);
     reigsterWindowChangeSignalHandler();
 
-    var channel: EventChannel = .{};
-    try EventHandlerUtils.registerEventHandler(&resize_requested, &channel, io, DisplayUtils.queryBoardSize, tick_rate_ms);
+    var channel: event.EventHandlerUtils.EventChannel = .{};
+    try event.EventHandlerUtils.registerEventHandler(&resize_requested, &channel, init.io, app.AppUtils.queryBoardSize);
 
-    var model = types.ModelUtils.initializeModel(DisplayUtils.queryBoardSize());
     while (true) {
-        const action = channel.recv(io);
-        model = types.ModelUtils.updateModel(model, action);
+        const action = channel.recv(init.io);
+        session.model = types.ModelUtils.updateModel(session.model, action);
 
-        if (model.mode == .QUIT) {
-            DisplayUtils.exitRawMode(original_termios);
-            break;
-        }
+        const should_quit = try app.AppUtils.handleBeforeHook(stdout_writer, action, original_termios);
+        if (should_quit) break;
 
-        const beforeHook: display.BeforeHook = if (action == .resized) .CLEAR else .NO_OP;
-        try DisplayUtils.drawBoard(stdout_writer, model, beforeHook);
+        try app.AppUtils.drawBoard(stdout_writer, session.model);
     }
 }
+
+const Session = struct {
+    model: types.Model,
+    stdout: Stdout,
+};
 
 const Stdout = struct {
     buffer: [1 << 16]u8 = undefined,
@@ -52,5 +47,10 @@ const Stdout = struct {
 
     fn writer(self: *Stdout) *std.Io.Writer {
         return &self.file_writer.interface;
+    }
+
+    fn setup(self: *Stdout, io: std.Io) *std.Io.Writer {
+        self.init(io);
+        return self.writer();
     }
 };
