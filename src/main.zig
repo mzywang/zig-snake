@@ -5,24 +5,36 @@ const Io = std.Io;
 const board_width = 20;
 const board_height = 10;
 const tick_rate_ms = 150;
+const ctrl_c = 0x03;
+
+const Mode = enum {
+    START,
+    PLAYING,
+    QUIT,
+};
 
 const Model = struct {
-    state: u8, // 1 or 2
+    mode: Mode,
     dot_col: usize, // 0..board_width, wraps around
 };
 
 const Action = enum {
     tick,
     key_pressed,
+    quit,
 };
 
 fn update(model: Model, action: Action) Model {
     return switch (action) {
-        .tick => .{ .state = model.state, .dot_col = (model.dot_col + 1) % board_width },
+        .tick => .{
+            .mode = model.mode,
+            .dot_col = if (model.mode == .PLAYING) (model.dot_col + 1) % board_width else model.dot_col,
+        },
         .key_pressed => .{
-            .state = if (model.state == 1) 2 else model.state,
+            .mode = if (model.mode == .START) .PLAYING else model.mode,
             .dot_col = model.dot_col,
         },
+        .quit => .{ .mode = .QUIT, .dot_col = model.dot_col },
     };
 }
 
@@ -66,9 +78,9 @@ fn eventHandler(channel: *EventChannel, io: Io) void {
         }};
         const n = posix.poll(&fds, tick_rate_ms) catch 0;
         if (n > 0) {
-            var discard: [1]u8 = undefined;
-            _ = posix.read(posix.STDIN_FILENO, &discard) catch {};
-            channel.send(io, .key_pressed);
+            var byte: [1]u8 = undefined;
+            _ = posix.read(posix.STDIN_FILENO, &byte) catch {};
+            channel.send(io, if (byte[0] == ctrl_c) .quit else .key_pressed);
         } else {
             channel.send(io, .tick);
         }
@@ -90,22 +102,29 @@ pub fn main(init: std.process.Init) !void {
     var channel: EventChannel = .{};
     _ = try std.Thread.spawn(.{}, eventHandler, .{ &channel, io });
 
-    var model: Model = .{ .state = 1, .dot_col = 0 };
+    var model: Model = .{ .mode = .START, .dot_col = 0 };
     while (true) {
         const action = channel.recv(io);
         model = update(model, action);
+
+        if (model.mode == .QUIT) {
+            try posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, original_termios);
+            break;
+        }
 
         try drawBoard(stdout_writer, model);
     }
 }
 
-/// Disables canonical mode and echo so keypresses can be detected without
-/// the user pressing Enter, and returns the original settings to restore later.
+/// Disables canonical mode, echo, and signal generation so keypresses
+/// (including Ctrl-C) can be read as raw bytes instead of the terminal
+/// acting on them. Returns the original settings to restore later.
 fn enterRawMode() !posix.termios {
     const original = try posix.tcgetattr(posix.STDIN_FILENO);
     var raw = original;
     raw.lflag.ICANON = false;
     raw.lflag.ECHO = false;
+    raw.lflag.ISIG = false;
     try posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, raw);
     return original;
 }
@@ -113,11 +132,7 @@ fn enterRawMode() !posix.termios {
 fn drawBoard(writer: *Io.Writer, model: Model) !void {
     try writer.writeAll("\x1b[H"); // move cursor home, then redraw
     const dot_col = 1 + model.dot_col;
-    const dot_row: usize = switch (model.state) {
-        1 => 1,
-        2 => 2,
-        else => unreachable,
-    };
+    const dot_row = 1;
 
     for (0..board_height + 2) |row| {
         for (0..board_width + 2) |col| {
