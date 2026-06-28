@@ -8,6 +8,29 @@ pub const BeforeHook = enum {
 };
 
 pub const AppUtils = struct {
+    pub const Session = struct {
+        model: types.Model,
+        stdout: Stdout,
+    };
+
+    pub const Stdout = struct {
+        buffer: [1 << 16]u8 = undefined,
+        file_writer: std.Io.File.Writer = undefined,
+
+        fn init(self: *Stdout, io: std.Io) void {
+            self.file_writer = .init(.stdout(), io, &self.buffer);
+        }
+
+        fn writer(self: *Stdout) *std.Io.Writer {
+            return &self.file_writer.interface;
+        }
+
+        pub fn setup(self: *Stdout, io: std.Io) *std.Io.Writer {
+            self.init(io);
+            return self.writer();
+        }
+    };
+
     pub fn enterAlternateScreen(writer: *std.Io.Writer) !void {
         try writer.writeAll("\x1b[?1049h\x1b[2J");
         try writer.flush();
