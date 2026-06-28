@@ -148,14 +148,22 @@ fn eventHandler(channel: *EventChannel, io: Io) void {
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
 
-    var stdout_buffer: [1024]u8 = undefined;
+    // Large enough to hold a full frame (border + grid + newlines) for
+    // any reasonably-sized terminal in one write, so each redraw reaches
+    // the terminal in a single syscall instead of tearing across two.
+    var stdout_buffer: [1 << 16]u8 = undefined;
     var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     const stdout_writer = &stdout_file_writer.interface;
 
     const original_termios = try enterRawMode();
     defer posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, original_termios) catch {};
 
-    try stdout_writer.writeAll("\x1b[2J"); // clear the screen once at startup
+    // Switch to the alternate screen buffer so frames don't pile up in the
+    // terminal's normal scrollback (same trick vim/htop/less use). Restored
+    // on exit below.
+    try stdout_writer.writeAll("\x1b[?1049h\x1b[2J");
+    defer stdout_writer.flush() catch {}; // declared first, so it runs *after* the write below
+    defer stdout_writer.writeAll("\x1b[?1049l") catch {};
 
     const winch_action: posix.Sigaction = .{
         .handler = .{ .sigaction = handleSigWinch },
