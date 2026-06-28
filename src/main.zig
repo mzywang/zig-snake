@@ -108,33 +108,29 @@ const EventChannel = struct {
     }
 };
 
-/// Set by `handleSigWinch` (run on a signal, so it must stay minimal) and
-/// consumed by `eventHandler`, which does the actual work of querying the
-/// new size and sending it over the channel.
-var resize_requested: std.atomic.Value(bool) = .init(false);
-
-fn reigsterWindowChangeSignalHandler() void {
-    const handleSigWinch = struct {
-        fn handle(sig: posix.SIG, info: *const posix.siginfo_t, ctx_ptr: ?*anyopaque) callconv(.c) void {
-            _ = sig;
-            _ = info;
-            _ = ctx_ptr;
-            resize_requested.store(true, .monotonic);
-        }
-    }.handle;
-
-    const winch_action: posix.Sigaction = .{
-        .handler = .{ .sigaction = handleSigWinch },
-        .mask = posix.sigemptyset(),
-        .flags = (posix.SA.SIGINFO | posix.SA.RESTART),
-    };
-    posix.sigaction(.WINCH, &winch_action, null);
-}
-
 const Utils = struct {
-    /// Queries the current terminal dimensions via the TIOCGWINSZ ioctl,
-    /// returning the interior board size (terminal size minus the border),
-    /// clamped to a sane minimum.
+    fn makeWindowChangeRegistrar(comptime flag: *std.atomic.Value(bool)) fn () void {
+        return struct {
+            fn register() void {
+                const handleSigWinch = struct {
+                    fn handle(sig: posix.SIG, info: *const posix.siginfo_t, ctx_ptr: ?*anyopaque) callconv(.c) void {
+                        _ = sig;
+                        _ = info;
+                        _ = ctx_ptr;
+                        flag.store(true, .monotonic);
+                    }
+                }.handle;
+
+                const winch_action: posix.Sigaction = .{
+                    .handler = .{ .sigaction = handleSigWinch },
+                    .mask = posix.sigemptyset(),
+                    .flags = (posix.SA.SIGINFO | posix.SA.RESTART),
+                };
+                posix.sigaction(.WINCH, &winch_action, null);
+            }
+        }.register;
+    }
+
     fn queryBoardSize() BoardSize {
         var ws: posix.winsize = .{ .row = 0, .col = 0, .xpixel = 0, .ypixel = 0 };
         _ = std.c.ioctl(posix.STDOUT_FILENO, @intCast(std.c.T.IOCGWINSZ), &ws);
@@ -143,11 +139,37 @@ const Utils = struct {
             .height = @max(min_board_height, @as(usize, ws.row) -| 2),
         };
     }
+
+    fn enterAlternateScreen(writer: *Io.Writer) !void {
+        try writer.writeAll("\x1b[?1049h\x1b[2J");
+        try writer.flush();
+    }
+
+    fn exitAlternateScreen(writer: *Io.Writer) void {
+        writer.writeAll("\x1b[?1049l") catch {};
+        writer.flush() catch {};
+    }
+
+    fn enterRawMode() !posix.termios {
+        const original = try posix.tcgetattr(posix.STDIN_FILENO);
+        var raw = original;
+        raw.lflag.ICANON = false;
+        raw.lflag.ECHO = false;
+        raw.lflag.ISIG = false;
+        try posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, raw);
+        return original;
+    }
+
+    fn exitRawMode(original: posix.termios) void {
+        posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, original) catch {};
+    }
 };
 
 fn registerEventHandler(channel: *EventChannel, io: Io) !void {
     _ = try std.Thread.spawn(.{}, eventHandler, .{ channel, io, Utils.queryBoardSize });
 }
+
+var resize_requested: std.atomic.Value(bool) = .init(false);
 
 fn eventHandler(channel: *EventChannel, io: Io, queryBoardSize: fn () BoardSize) void {
     var last_tick: Io.Clock.Timestamp = .now(io, .awake);
@@ -183,17 +205,18 @@ fn eventHandler(channel: *EventChannel, io: Io, queryBoardSize: fn () BoardSize)
 }
 
 pub fn main(init: std.process.Init) !void {
-    const original_termios = try enterRawMode();
-    defer exitRawMode(original_termios);
+    const original_termios = try Utils.enterRawMode();
+    defer Utils.exitRawMode(original_termios);
 
     var stdout: Stdout = .{};
     const io = init.io;
     stdout.init(io);
     const stdout_writer = stdout.writer();
 
-    try enterAlternateScreen(stdout_writer);
-    defer exitAlternateScreen(stdout_writer);
+    try Utils.enterAlternateScreen(stdout_writer);
+    defer Utils.exitAlternateScreen(stdout_writer);
 
+    const reigsterWindowChangeSignalHandler = Utils.makeWindowChangeRegistrar(&resize_requested);
     reigsterWindowChangeSignalHandler();
 
     var channel: EventChannel = .{};
@@ -205,7 +228,7 @@ pub fn main(init: std.process.Init) !void {
         model = update(model, action);
 
         if (model.mode == .QUIT) {
-            exitRawMode(original_termios);
+            Utils.exitRawMode(original_termios);
             break;
         }
 
@@ -225,33 +248,6 @@ const Stdout = struct {
         return &self.file_writer.interface;
     }
 };
-
-fn enterAlternateScreen(writer: *Io.Writer) !void {
-    try writer.writeAll("\x1b[?1049h\x1b[2J");
-    try writer.flush();
-}
-
-fn exitAlternateScreen(writer: *Io.Writer) void {
-    writer.writeAll("\x1b[?1049l") catch {};
-    writer.flush() catch {};
-}
-
-/// Disables canonical mode, echo, and signal generation so keypresses
-/// (including Ctrl-C) can be read as raw bytes instead of the terminal
-/// acting on them. Returns the original settings to restore later.
-fn enterRawMode() !posix.termios {
-    const original = try posix.tcgetattr(posix.STDIN_FILENO);
-    var raw = original;
-    raw.lflag.ICANON = false;
-    raw.lflag.ECHO = false;
-    raw.lflag.ISIG = false;
-    try posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, raw);
-    return original;
-}
-
-fn exitRawMode(original: posix.termios) void {
-    posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, original) catch {};
-}
 
 fn drawBoard(writer: *Io.Writer, model: Model) !void {
     if (model.needs_clear) try writer.writeAll("\x1b[2J"); // clear stale content around the resized board
