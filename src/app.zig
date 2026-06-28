@@ -82,8 +82,11 @@ pub const AppUtils = struct {
     }
 
     pub fn drawBoard(writer: *std.Io.Writer, m: model.Model) !void {
-        if (m.mode == .START) return drawStartScreen(writer, m);
-        return drawPlayingBoard(writer, m);
+        return switch (m.mode) {
+            .START => drawMessageScreen(writer, m, "Press any key to start"),
+            .GAME_OVER => drawMessageScreen(writer, m, "Game over - press any key to restart"),
+            else => drawPlayingBoard(writer, m),
+        };
     }
 
     fn drawPlayingBoard(writer: *std.Io.Writer, m: model.Model) !void {
@@ -128,10 +131,9 @@ pub const AppUtils = struct {
         return "║";
     }
 
-    fn drawStartScreen(writer: *std.Io.Writer, m: model.Model) !void {
+    fn drawMessageScreen(writer: *std.Io.Writer, m: model.Model, message: []const u8) !void {
         try writer.writeAll("\x1b[H");
 
-        const message = "Press any key to start";
         const box_height = 3;
         const box_width = message.len + 4;
         const cell_width = @max(1, @as(usize, @intFromFloat(@round(m.cell_aspect_ratio))));

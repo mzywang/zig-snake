@@ -1,6 +1,7 @@
 pub const Mode = enum {
     START,
     PLAYING,
+    GAME_OVER,
     QUIT,
 };
 
@@ -53,9 +54,15 @@ pub const ModelUtils = struct {
         };
     }
 
-    fn advance(position: usize, bound: usize, direction: Direction, forward: Direction, backward: Direction) usize {
-        if (direction == forward) return (position + 1) % bound;
-        if (direction == backward) return (position + bound - 1) % bound;
+    fn hitsWall(position: usize, bound: usize, direction: Direction, forward: Direction, backward: Direction) bool {
+        if (direction == forward) return position + 1 >= bound;
+        if (direction == backward) return position == 0;
+        return false;
+    }
+
+    fn advance(position: usize, direction: Direction, forward: Direction, backward: Direction) usize {
+        if (direction == forward) return position + 1;
+        if (direction == backward) return position - 1;
         return position;
     }
 
@@ -77,10 +84,13 @@ pub const ModelUtils = struct {
                     .ticks_since_move = ticks_since_move,
                 };
 
+                const hit_wall = hitsWall(model.dot_col, model.board_width, model.direction, .right, .left) or
+                    hitsWall(model.dot_row, model.board_height, model.direction, .down, .up);
+
                 break :blk .{
-                    .mode = model.mode,
-                    .dot_col = advance(model.dot_col, model.board_width, model.direction, .right, .left),
-                    .dot_row = advance(model.dot_row, model.board_height, model.direction, .down, .up),
+                    .mode = if (hit_wall) .GAME_OVER else model.mode,
+                    .dot_col = if (hit_wall) model.dot_col else advance(model.dot_col, model.direction, .right, .left),
+                    .dot_row = if (hit_wall) model.dot_row else advance(model.dot_row, model.direction, .down, .up),
                     .direction = model.direction,
                     .board_width = model.board_width,
                     .board_height = model.board_height,
@@ -88,7 +98,16 @@ pub const ModelUtils = struct {
                     .ticks_since_move = 0,
                 };
             },
-            .key_pressed => |direction| .{
+            .key_pressed => |direction| if (model.mode == .GAME_OVER) .{
+                .mode = .PLAYING,
+                .dot_col = 0,
+                .dot_row = 0,
+                .direction = .right,
+                .board_width = model.board_width,
+                .board_height = model.board_height,
+                .cell_aspect_ratio = model.cell_aspect_ratio,
+                .ticks_since_move = 0,
+            } else .{
                 .mode = if (model.mode == .START) .PLAYING else model.mode,
                 .dot_col = model.dot_col,
                 .dot_row = model.dot_row,
