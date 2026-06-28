@@ -65,7 +65,18 @@ pub const AppUtils = struct {
         return .{
             .width = @max(min_board_width, @as(usize, ws.col) -| 2),
             .height = @max(min_board_height, @as(usize, ws.row) -| 2),
+            .cell_aspect_ratio = queryCellAspectRatio(ws),
         };
+    }
+
+    fn queryCellAspectRatio(ws: std.posix.winsize) f64 {
+        if (ws.col == 0 or ws.row == 0 or ws.xpixel == 0 or ws.ypixel == 0) {
+            return model.default_cell_aspect_ratio;
+        }
+
+        const cell_width = @as(f64, @floatFromInt(ws.xpixel)) / @as(f64, @floatFromInt(ws.col));
+        const cell_height = @as(f64, @floatFromInt(ws.ypixel)) / @as(f64, @floatFromInt(ws.row));
+        return cell_height / cell_width;
     }
 
     pub fn drawBoard(writer: *std.Io.Writer, m: model.Model) !void {
