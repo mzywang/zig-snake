@@ -99,6 +99,15 @@ fn handleSigWinch(sig: posix.SIG, info: *const posix.siginfo_t, ctx_ptr: ?*anyop
     resize_requested.store(true, .monotonic);
 }
 
+fn registerSigWinchHandler() void {
+    const winch_action: posix.Sigaction = .{
+        .handler = .{ .sigaction = handleSigWinch },
+        .mask = posix.sigemptyset(),
+        .flags = (posix.SA.SIGINFO | posix.SA.RESTART),
+    };
+    posix.sigaction(.WINCH, &winch_action, null);
+}
+
 /// Queries the current terminal dimensions via the TIOCGWINSZ ioctl,
 /// returning the interior board size (terminal size minus the border),
 /// clamped to a sane minimum.
@@ -159,12 +168,7 @@ pub fn main(init: std.process.Init) !void {
     defer stdout_writer.flush() catch {};
     defer stdout_writer.writeAll("\x1b[?1049l") catch {};
 
-    const winch_action: posix.Sigaction = .{
-        .handler = .{ .sigaction = handleSigWinch },
-        .mask = posix.sigemptyset(),
-        .flags = (posix.SA.SIGINFO | posix.SA.RESTART),
-    };
-    posix.sigaction(.WINCH, &winch_action, null);
+    registerSigWinchHandler();
 
     var channel: EventChannel = .{};
     _ = try std.Thread.spawn(.{}, eventHandler, .{ &channel, io });
