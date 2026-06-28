@@ -95,9 +95,7 @@ pub fn main(init: std.process.Init) !void {
         const action = channel.recv(io);
         model = update(model, action);
 
-        try stdout_writer.writeAll("\x1b[H"); // move cursor home, then redraw
         try drawBoard(stdout_writer, model);
-        try stdout_writer.flush();
     }
 }
 
@@ -113,6 +111,7 @@ fn enterRawMode() !posix.termios {
 }
 
 fn drawBoard(writer: *Io.Writer, model: Model) !void {
+    try writer.writeAll("\x1b[H"); // move cursor home, then redraw
     const dot_col = 1 + model.dot_col;
     const dot_row: usize = switch (model.state) {
         1 => 1,
@@ -129,4 +128,6 @@ fn drawBoard(writer: *Io.Writer, model: Model) !void {
         }
         try writer.writeByte('\n');
     }
+
+    try writer.flush();
 }
