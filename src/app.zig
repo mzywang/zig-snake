@@ -69,7 +69,9 @@ pub const AppUtils = struct {
     }
 
     pub fn drawBoard(writer: *std.Io.Writer, model: types.Model) !void {
-        try writer.writeAll("\x1b[H"); // move cursor home, then redraw
+        if (model.mode == .START) return drawStartScreen(writer, model);
+
+        try writer.writeAll("\x1b[H");
         const dot_col = 1 + model.dot_col;
         const dot_row = 1;
 
@@ -80,7 +82,54 @@ pub const AppUtils = struct {
                 const is_dot = row == dot_row and col == dot_col;
                 try writer.writeByte(if (is_border) '#' else if (is_dot) '*' else '.');
             }
-            try writer.writeByte('\n');
+            if (row != model.board_height + 1) try writer.writeByte('\n');
+        }
+
+        try writer.flush();
+    }
+
+    fn drawStartScreen(writer: *std.Io.Writer, model: types.Model) !void {
+        try writer.writeAll("\x1b[H");
+
+        const message = "Press any key to start";
+        const box_height = 3;
+        const box_width = message.len + 4;
+        const total_rows = model.board_height + 2;
+        const total_cols = model.board_width + 2;
+        const shadow_offset = 1;
+
+        const box_top = 1 + (model.board_height -| box_height) / 2;
+        const box_left = 1 + (model.board_width -| box_width) / 2;
+
+        for (0..total_rows) |row| {
+            for (0..total_cols) |col| {
+                const is_border = row == 0 or row == total_rows - 1 or col == 0 or col == total_cols - 1;
+                const in_box = row >= box_top and row < box_top + box_height and
+                    col >= box_left and col < box_left + box_width;
+                const in_shadow = row >= box_top + shadow_offset and row < box_top + shadow_offset + box_height and
+                    col >= box_left + shadow_offset and col < box_left + shadow_offset + box_width;
+
+                if (in_box) {
+                    const box_row = row - box_top;
+                    const box_col = col - box_left;
+                    if (box_row == 0 or box_row == box_height - 1) {
+                        try writer.writeByte(if (box_col == 0 or box_col == box_width - 1) '+' else '-');
+                    } else if (box_col == 0 or box_col == box_width - 1) {
+                        try writer.writeByte('|');
+                    } else if (box_col == 1 or box_col == box_width - 2) {
+                        try writer.writeByte(' ');
+                    } else {
+                        try writer.writeByte(message[box_col - 2]);
+                    }
+                } else if (in_shadow) {
+                    try writer.writeAll("\x1b[100m \x1b[0m");
+                } else if (is_border) {
+                    try writer.writeByte('#');
+                } else {
+                    try writer.writeByte(' ');
+                }
+            }
+            if (row != total_rows - 1) try writer.writeByte('\n');
         }
 
         try writer.flush();
