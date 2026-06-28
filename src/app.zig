@@ -4,9 +4,10 @@ const types = @import("model.zig");
 pub const BeforeHook = enum {
     CLEAR,
     NO_OP,
+    QUIT,
 };
 
-pub const DisplayUtils = struct {
+pub const AppUtils = struct {
     pub fn enterAlternateScreen(writer: *std.Io.Writer) !void {
         try writer.writeAll("\x1b[?1049h\x1b[2J");
         try writer.flush();
@@ -44,8 +45,7 @@ pub const DisplayUtils = struct {
         };
     }
 
-    pub fn drawBoard(writer: *std.Io.Writer, model: types.Model, clear_board_before_drawing: BeforeHook) !void {
-        if (clear_board_before_drawing == .CLEAR) try writer.writeAll("\x1b[2J"); // clear stale content around the resized board
+    pub fn drawBoard(writer: *std.Io.Writer, model: types.Model) !void {
         try writer.writeAll("\x1b[H"); // move cursor home, then redraw
         const dot_col = 1 + model.dot_col;
         const dot_row = 1;
@@ -61,5 +61,21 @@ pub const DisplayUtils = struct {
         }
 
         try writer.flush();
+    }
+
+    pub fn handleBeforeHook(writer: *std.Io.Writer, action: types.Action, original_termios: std.posix.termios) !bool {
+        const before_hook: BeforeHook = switch (action) {
+            .quit => .QUIT,
+            .resized => .CLEAR,
+            else => .NO_OP,
+        };
+
+        if (before_hook == .QUIT) {
+            exitRawMode(original_termios);
+            return true;
+        }
+
+        if (before_hook == .CLEAR) try writer.writeAll("\x1b[2J"); // clear stale content around the resized board
+        return false;
     }
 };

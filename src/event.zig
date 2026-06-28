@@ -92,9 +92,13 @@ pub const EventHandlerUtils = struct {
         channel: *EventChannel,
         io: std.Io,
         queryBoardSize: fn () types.BoardSize,
-        tick_rate_ms: i64,
     ) !void {
-        _ = try std.Thread.spawn(.{}, eventHandler, .{ resize_requested, channel, io, queryBoardSize, tick_rate_ms });
+        _ = try std.Thread.spawn(.{}, eventHandler, .{
+            resize_requested,
+            channel,
+            io,
+            queryBoardSize,
+        });
     }
 
     fn eventHandler(
@@ -102,8 +106,8 @@ pub const EventHandlerUtils = struct {
         channel: *EventChannel,
         io: std.Io,
         queryBoardSize: fn () types.BoardSize,
-        tick_rate_ms: i64,
     ) void {
+        const tick_rate_ms = 150;
         var last_tick: std.Io.Clock.Timestamp = .now(io, .awake);
 
         while (true) {
