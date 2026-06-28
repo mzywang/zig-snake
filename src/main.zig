@@ -18,14 +18,31 @@ const Model = struct {
     dot_col: usize, // 0..board_width, wraps around
     board_width: usize,
     board_height: usize,
+    needs_clear: bool, // true only on the frame right after a resize
 };
+
+const BoardSize = struct { width: usize, height: usize };
 
 const Action = union(enum) {
     tick,
     key_pressed,
     quit,
-    resized: struct { width: usize, height: usize },
+    resized: BoardSize,
 };
+
+fn resizeRequest(size: BoardSize) Action {
+    return .{ .resized = size };
+}
+
+fn initializeModel(initial_size: BoardSize) Model {
+    return .{
+        .mode = .START,
+        .dot_col = 0,
+        .board_width = initial_size.width,
+        .board_height = initial_size.height,
+        .needs_clear = false,
+    };
+}
 
 fn update(model: Model, action: Action) Model {
     return switch (action) {
@@ -34,24 +51,28 @@ fn update(model: Model, action: Action) Model {
             .dot_col = if (model.mode == .PLAYING) (model.dot_col + 1) % model.board_width else model.dot_col,
             .board_width = model.board_width,
             .board_height = model.board_height,
+            .needs_clear = false,
         },
         .key_pressed => .{
             .mode = if (model.mode == .START) .PLAYING else model.mode,
             .dot_col = model.dot_col,
             .board_width = model.board_width,
             .board_height = model.board_height,
+            .needs_clear = false,
         },
         .quit => .{
             .mode = .QUIT,
             .dot_col = model.dot_col,
             .board_width = model.board_width,
             .board_height = model.board_height,
+            .needs_clear = false,
         },
         .resized => |size| .{
             .mode = model.mode,
             .dot_col = model.dot_col % size.width,
             .board_width = size.width,
             .board_height = size.height,
+            .needs_clear = true,
         },
     };
 }
@@ -87,37 +108,75 @@ const EventChannel = struct {
     }
 };
 
-/// Set by `handleSigWinch` (run on a signal, so it must stay minimal) and
-/// consumed by `eventHandler`, which does the actual work of querying the
-/// new size and sending it over the channel.
+const Utils = struct {
+    fn makeWindowChangeRegistrar(comptime flag: *std.atomic.Value(bool)) fn () void {
+        return struct {
+            fn register() void {
+                const handleSigWinch = struct {
+                    fn handle(sig: posix.SIG, info: *const posix.siginfo_t, ctx_ptr: ?*anyopaque) callconv(.c) void {
+                        _ = sig;
+                        _ = info;
+                        _ = ctx_ptr;
+                        flag.store(true, .monotonic);
+                    }
+                }.handle;
+
+                const winch_action: posix.Sigaction = .{
+                    .handler = .{ .sigaction = handleSigWinch },
+                    .mask = posix.sigemptyset(),
+                    .flags = (posix.SA.SIGINFO | posix.SA.RESTART),
+                };
+                posix.sigaction(.WINCH, &winch_action, null);
+            }
+        }.register;
+    }
+
+    fn queryBoardSize() BoardSize {
+        var ws: posix.winsize = .{ .row = 0, .col = 0, .xpixel = 0, .ypixel = 0 };
+        _ = std.c.ioctl(posix.STDOUT_FILENO, @intCast(std.c.T.IOCGWINSZ), &ws);
+        return .{
+            .width = @max(min_board_width, @as(usize, ws.col) -| 2),
+            .height = @max(min_board_height, @as(usize, ws.row) -| 2),
+        };
+    }
+
+    fn enterAlternateScreen(writer: *Io.Writer) !void {
+        try writer.writeAll("\x1b[?1049h\x1b[2J");
+        try writer.flush();
+    }
+
+    fn exitAlternateScreen(writer: *Io.Writer) void {
+        writer.writeAll("\x1b[?1049l") catch {};
+        writer.flush() catch {};
+    }
+
+    fn enterRawMode() !posix.termios {
+        const original = try posix.tcgetattr(posix.STDIN_FILENO);
+        var raw = original;
+        raw.lflag.ICANON = false;
+        raw.lflag.ECHO = false;
+        raw.lflag.ISIG = false;
+        try posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, raw);
+        return original;
+    }
+
+    fn exitRawMode(original: posix.termios) void {
+        posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, original) catch {};
+    }
+};
+
+fn registerEventHandler(channel: *EventChannel, io: Io) !void {
+    _ = try std.Thread.spawn(.{}, eventHandler, .{ channel, io, Utils.queryBoardSize });
+}
+
 var resize_requested: std.atomic.Value(bool) = .init(false);
 
-fn handleSigWinch(sig: posix.SIG, info: *const posix.siginfo_t, ctx_ptr: ?*anyopaque) callconv(.c) void {
-    _ = sig;
-    _ = info;
-    _ = ctx_ptr;
-    resize_requested.store(true, .monotonic);
-}
-
-/// Queries the current terminal dimensions via the TIOCGWINSZ ioctl,
-/// returning the interior board size (terminal size minus the border),
-/// clamped to a sane minimum.
-fn queryBoardSize() struct { width: usize, height: usize } {
-    var ws: posix.winsize = .{ .row = 0, .col = 0, .xpixel = 0, .ypixel = 0 };
-    _ = std.c.ioctl(posix.STDOUT_FILENO, @intCast(std.c.T.IOCGWINSZ), &ws);
-    return .{
-        .width = @max(min_board_width, @as(usize, ws.col) -| 2),
-        .height = @max(min_board_height, @as(usize, ws.row) -| 2),
-    };
-}
-
-fn eventHandler(channel: *EventChannel, io: Io) void {
+fn eventHandler(channel: *EventChannel, io: Io, queryBoardSize: fn () BoardSize) void {
     var last_tick: Io.Clock.Timestamp = .now(io, .awake);
 
     while (true) {
         if (resize_requested.swap(false, .monotonic)) {
-            const size = queryBoardSize();
-            channel.send(io, .{ .resized = .{ .width = size.width, .height = size.height } });
+            channel.send(io, resizeRequest(queryBoardSize()));
         }
 
         const elapsed_ms = last_tick.untilNow(io).raw.toMilliseconds();
@@ -146,64 +205,52 @@ fn eventHandler(channel: *EventChannel, io: Io) void {
 }
 
 pub fn main(init: std.process.Init) !void {
+    const original_termios = try Utils.enterRawMode();
+    defer Utils.exitRawMode(original_termios);
+
+    var stdout: Stdout = .{};
     const io = init.io;
+    stdout.init(io);
+    const stdout_writer = stdout.writer();
 
-    var stdout_buffer: [1 << 16]u8 = undefined;
-    var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
-    const stdout_writer = &stdout_file_writer.interface;
+    try Utils.enterAlternateScreen(stdout_writer);
+    defer Utils.exitAlternateScreen(stdout_writer);
 
-    const original_termios = try enterRawMode();
-    defer posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, original_termios) catch {};
-
-    try stdout_writer.writeAll("\x1b[?1049h\x1b[2J");
-    defer stdout_writer.flush() catch {};
-    defer stdout_writer.writeAll("\x1b[?1049l") catch {};
-
-    const winch_action: posix.Sigaction = .{
-        .handler = .{ .sigaction = handleSigWinch },
-        .mask = posix.sigemptyset(),
-        .flags = (posix.SA.SIGINFO | posix.SA.RESTART),
-    };
-    posix.sigaction(.WINCH, &winch_action, null);
+    const reigsterWindowChangeSignalHandler = Utils.makeWindowChangeRegistrar(&resize_requested);
+    reigsterWindowChangeSignalHandler();
 
     var channel: EventChannel = .{};
-    _ = try std.Thread.spawn(.{}, eventHandler, .{ &channel, io });
+    try registerEventHandler(&channel, io);
 
-    const initial_size = queryBoardSize();
-    var model: Model = .{
-        .mode = .START,
-        .dot_col = 0,
-        .board_width = initial_size.width,
-        .board_height = initial_size.height,
-    };
+    var model = initializeModel(Utils.queryBoardSize());
     while (true) {
         const action = channel.recv(io);
         model = update(model, action);
 
         if (model.mode == .QUIT) {
-            try posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, original_termios);
+            Utils.exitRawMode(original_termios);
             break;
         }
 
-        if (action == .resized) try stdout_writer.writeAll("\x1b[2J"); // clear stale content around the resized board
         try drawBoard(stdout_writer, model);
     }
 }
 
-/// Disables canonical mode, echo, and signal generation so keypresses
-/// (including Ctrl-C) can be read as raw bytes instead of the terminal
-/// acting on them. Returns the original settings to restore later.
-fn enterRawMode() !posix.termios {
-    const original = try posix.tcgetattr(posix.STDIN_FILENO);
-    var raw = original;
-    raw.lflag.ICANON = false;
-    raw.lflag.ECHO = false;
-    raw.lflag.ISIG = false;
-    try posix.tcsetattr(posix.STDIN_FILENO, .FLUSH, raw);
-    return original;
-}
+const Stdout = struct {
+    buffer: [1 << 16]u8 = undefined,
+    file_writer: Io.File.Writer = undefined,
+
+    fn init(self: *Stdout, io: Io) void {
+        self.file_writer = .init(.stdout(), io, &self.buffer);
+    }
+
+    fn writer(self: *Stdout) *Io.Writer {
+        return &self.file_writer.interface;
+    }
+};
 
 fn drawBoard(writer: *Io.Writer, model: Model) !void {
+    if (model.needs_clear) try writer.writeAll("\x1b[2J"); // clear stale content around the resized board
     try writer.writeAll("\x1b[H"); // move cursor home, then redraw
     const dot_col = 1 + model.dot_col;
     const dot_row = 1;
