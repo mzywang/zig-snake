@@ -1,5 +1,5 @@
 const std = @import("std");
-const types = @import("model.zig");
+const model = @import("model.zig");
 
 pub const BeforeHook = enum {
     CLEAR,
@@ -9,7 +9,7 @@ pub const BeforeHook = enum {
 
 pub const AppUtils = struct {
     pub const Session = struct {
-        model: types.Model,
+        model: model.Model,
         stdout: Stdout,
     };
 
@@ -55,7 +55,7 @@ pub const AppUtils = struct {
         std.posix.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, original) catch {};
     }
 
-    pub fn queryBoardSize() types.BoardSize {
+    pub fn queryBoardSize() model.BoardSize {
         var ws: std.posix.winsize = .{ .row = 0, .col = 0, .xpixel = 0, .ypixel = 0 };
         _ = std.c.ioctl(std.posix.STDOUT_FILENO, @intCast(std.c.T.IOCGWINSZ), &ws);
 
@@ -68,12 +68,12 @@ pub const AppUtils = struct {
         };
     }
 
-    pub fn drawBoard(writer: *std.Io.Writer, model: types.Model) !void {
+    pub fn drawBoard(writer: *std.Io.Writer, model: model.Model) !void {
         if (model.mode == .START) return drawStartScreen(writer, model);
         return drawPlayingBoard(writer, model);
     }
 
-    fn drawPlayingBoard(writer: *std.Io.Writer, model: types.Model) !void {
+    fn drawPlayingBoard(writer: *std.Io.Writer, model: model.Model) !void {
         try writer.writeAll("\x1b[H");
         const dot_col = 1 + model.dot_col;
         const dot_row = 1;
@@ -113,7 +113,7 @@ pub const AppUtils = struct {
         return "║";
     }
 
-    fn drawStartScreen(writer: *std.Io.Writer, model: types.Model) !void {
+    fn drawStartScreen(writer: *std.Io.Writer, model: model.Model) !void {
         try writer.writeAll("\x1b[H");
 
         const message = "Press any key to start";
@@ -162,7 +162,7 @@ pub const AppUtils = struct {
         try writer.flush();
     }
 
-    pub fn handleBeforeHook(writer: *std.Io.Writer, action: types.Action, original_termios: std.posix.termios) !bool {
+    pub fn handleBeforeHook(writer: *std.Io.Writer, action: model.Action, original_termios: std.posix.termios) !bool {
         const before_hook: BeforeHook = switch (action) {
             .quit => .QUIT,
             .resized => .CLEAR,

@@ -1,5 +1,5 @@
 const std = @import("std");
-const types = @import("model.zig");
+const model = @import("model.zig");
 
 pub const EventHandlerUtils = struct {
     /// A bounded mpsc channel (single producer: the event thread; single
@@ -8,11 +8,11 @@ pub const EventHandlerUtils = struct {
     pub const EventChannel = struct {
         mutex: std.Io.Mutex = .init,
         cond: std.Io.Condition = .init,
-        buffer: [64]types.Action = undefined,
+        buffer: [64]model.Action = undefined,
         head: usize = 0,
         len: usize = 0,
 
-        pub fn send(self: *EventChannel, io: std.Io, action: types.Action) void {
+        pub fn send(self: *EventChannel, io: std.Io, action: model.Action) void {
             self.mutex.lock(io) catch return;
             defer self.mutex.unlock(io);
             // drop if the consumer is backed up
@@ -22,7 +22,7 @@ pub const EventHandlerUtils = struct {
             self.cond.signal(io);
         }
 
-        pub fn recv(self: *EventChannel, io: std.Io) types.Action {
+        pub fn recv(self: *EventChannel, io: std.Io) model.Action {
             self.mutex.lock(io) catch unreachable;
             defer self.mutex.unlock(io);
             while (self.len == 0) self.cond.wait(io, &self.mutex) catch unreachable;
@@ -55,7 +55,7 @@ pub const EventHandlerUtils = struct {
         }.register;
     }
 
-    fn resizeRequest(size: types.BoardSize) types.Action {
+    fn resizeRequest(size: model.BoardSize) model.Action {
         return .{ .resized = size };
     }
 
@@ -91,7 +91,7 @@ pub const EventHandlerUtils = struct {
         resize_requested: *std.atomic.Value(bool),
         channel: *EventChannel,
         io: std.Io,
-        queryBoardSize: fn () types.BoardSize,
+        queryBoardSize: fn () model.BoardSize,
     ) !void {
         _ = try std.Thread.spawn(.{}, eventHandler, .{
             resize_requested,
@@ -105,9 +105,9 @@ pub const EventHandlerUtils = struct {
         resize_requested: *std.atomic.Value(bool),
         channel: *EventChannel,
         io: std.Io,
-        queryBoardSize: fn () types.BoardSize,
+        queryBoardSize: fn () model.BoardSize,
     ) void {
-        const tick_rate_ms = 150;
+        const tick_rate_ms = model.tick_rate_ms;
         var last_tick: std.Io.Clock.Timestamp = .now(io, .awake);
 
         while (true) {
