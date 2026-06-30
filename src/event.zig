@@ -12,7 +12,7 @@ pub const EventHandlerUtils = struct {
         head: usize = 0,
         len: usize = 0,
 
-        pub fn send(self: *EventChannel, io: std.Io, action: model.Action) void {
+        fn send(self: *EventChannel, io: std.Io, action: model.Action) void {
             self.mutex.lock(io) catch return;
             defer self.mutex.unlock(io);
             // drop if the consumer is backed up
