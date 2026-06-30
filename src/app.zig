@@ -1,6 +1,8 @@
 const std = @import("std");
 const model = @import("model.zig");
 const ascii_display = @import("display/ascii.zig");
+const kitty_display = @import("display/kitty.zig");
+const common_display = @import("display/common.zig");
 
 pub const BeforeHook = enum {
     CLEAR,
@@ -38,7 +40,7 @@ pub const AppUtils = struct {
     }
 
     pub fn exitAlternateScreen(writer: *std.Io.Writer) void {
-        writer.writeAll("\x1b[?25h\x1b[?1049l") catch {};
+        writer.writeAll("\x1b_Ga=d,d=A,q=2;\x1b\\\x1b[?25h\x1b[?1049l") catch {};
         writer.flush() catch {};
     }
 
@@ -62,13 +64,11 @@ pub const AppUtils = struct {
 
         const min_board_width = 10;
         const min_board_height = 4;
-        const cell_aspect_ratio = queryCellAspectRatio(ws);
-        const cell_width = @max(1, @as(usize, @intFromFloat(@round(cell_aspect_ratio))));
 
         return .{
-            .width = @max(min_board_width, (@as(usize, ws.col) -| 2) / cell_width),
+            .width = @max(min_board_width, @as(usize, ws.col) -| 2),
             .height = @max(min_board_height, @as(usize, ws.row) -| 2),
-            .cell_aspect_ratio = cell_aspect_ratio,
+            .cell_aspect_ratio = queryCellAspectRatio(ws),
         };
     }
 
@@ -82,8 +82,21 @@ pub const AppUtils = struct {
         return cell_height / cell_width;
     }
 
-    pub fn drawBoard(writer: *std.Io.Writer, m: model.Model) !void {
-        try ascii_display.AsciiDisplayUtils.drawBoard(writer, m);
+    const RenderMode = enum { kitty, ascii };
+
+    fn detectRenderMode(writer: *std.Io.Writer, allocator: std.mem.Allocator, m: *model.Model) RenderMode {
+        kitty_display.KittyDisplayUtils.ensureKittyBoardFrame(writer, allocator, m) catch {
+            model.ModelUtils.resetKittyRenderState(m);
+            return .ascii;
+        };
+        return .kitty;
+    }
+
+    pub fn drawBoard(writer: *std.Io.Writer, allocator: std.mem.Allocator, m: *model.Model) !void {
+        switch (detectRenderMode(writer, allocator, m)) {
+            .ascii => try ascii_display.AsciiDisplayUtils.drawAsciiFrame(writer, m.*, common_display.drawMessageOverlay),
+            .kitty => try kitty_display.KittyDisplayUtils.drawKittyFrame(writer, allocator, m, common_display.drawMessageOverlay),
+        }
     }
 
     pub fn handleBeforeHook(writer: *std.Io.Writer, action: model.Action, original_termios: std.posix.termios) !bool {

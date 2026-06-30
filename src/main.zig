@@ -28,6 +28,6 @@ pub fn main(init: std.process.Init) !void {
         const should_quit = try app.AppUtils.handleBeforeHook(stdout_writer, action, original_termios);
         if (should_quit) break;
 
-        try app.AppUtils.drawBoard(stdout_writer, app_session.model);
+        try app.AppUtils.drawBoard(stdout_writer, init.gpa, &app_session.model);
     }
 }

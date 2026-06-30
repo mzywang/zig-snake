@@ -21,6 +21,12 @@ pub const Model = struct {
     board_height: usize,
     cell_aspect_ratio: f64,
     ticks_since_move: usize,
+    message_overlay_region: ?MessageRegion,
+    background_sent: bool,
+    background_cols: usize,
+    background_rows: usize,
+    dot_sprite_sent: bool,
+    dot_placed: bool,
 };
 
 pub const tick_rate_ms: i64 = 16;
@@ -40,6 +46,8 @@ pub const Action = union(enum) {
     resized: BoardSize,
 };
 
+pub const MessageRegion = struct { top: usize, left: usize, height: usize, width: usize };
+
 pub const ModelUtils = struct {
     pub fn initializeModel(initial_size: BoardSize) Model {
         return .{
@@ -51,7 +59,50 @@ pub const ModelUtils = struct {
             .board_height = initial_size.height,
             .cell_aspect_ratio = initial_size.cell_aspect_ratio,
             .ticks_since_move = 0,
+            .message_overlay_region = null,
+            .background_sent = false,
+            .background_cols = 0,
+            .background_rows = 0,
+            .dot_sprite_sent = false,
+            .dot_placed = false,
         };
+    }
+
+    pub fn setMessageOverlayRegion(m: *Model, region: MessageRegion) void {
+        m.message_overlay_region = region;
+    }
+
+    pub fn clearMessageOverlayRegion(m: *Model) void {
+        m.message_overlay_region = null;
+    }
+
+    pub fn resetKittyRenderState(m: *Model) void {
+        m.message_overlay_region = null;
+        m.background_sent = false;
+        m.background_cols = 0;
+        m.background_rows = 0;
+        m.dot_sprite_sent = false;
+        m.dot_placed = false;
+    }
+
+    pub fn markBackgroundSent(m: *Model, cols: usize, rows: usize) void {
+        m.background_sent = true;
+        m.background_cols = cols;
+        m.background_rows = rows;
+        m.dot_sprite_sent = false;
+        m.dot_placed = false;
+    }
+
+    pub fn markDotSpriteSent(m: *Model) void {
+        m.dot_sprite_sent = true;
+    }
+
+    pub fn markDotPlaced(m: *Model) void {
+        m.dot_placed = true;
+    }
+
+    pub fn clearDotPlaced(m: *Model) void {
+        m.dot_placed = false;
     }
 
     fn hitsWall(position: usize, bound: usize, direction: Direction, forward: Direction, backward: Direction) bool {
@@ -82,6 +133,12 @@ pub const ModelUtils = struct {
                     .board_height = model.board_height,
                     .cell_aspect_ratio = model.cell_aspect_ratio,
                     .ticks_since_move = ticks_since_move,
+                    .message_overlay_region = model.message_overlay_region,
+                    .background_sent = model.background_sent,
+                    .background_cols = model.background_cols,
+                    .background_rows = model.background_rows,
+                    .dot_sprite_sent = model.dot_sprite_sent,
+                    .dot_placed = model.dot_placed,
                 };
 
                 const hit_wall = hitsWall(model.dot_col, model.board_width, model.direction, .right, .left) or
@@ -96,6 +153,12 @@ pub const ModelUtils = struct {
                     .board_height = model.board_height,
                     .cell_aspect_ratio = model.cell_aspect_ratio,
                     .ticks_since_move = 0,
+                    .message_overlay_region = model.message_overlay_region,
+                    .background_sent = model.background_sent,
+                    .background_cols = model.background_cols,
+                    .background_rows = model.background_rows,
+                    .dot_sprite_sent = model.dot_sprite_sent,
+                    .dot_placed = model.dot_placed,
                 };
             },
             .key_pressed => |direction| if (model.mode == .GAME_OVER) .{
@@ -107,6 +170,12 @@ pub const ModelUtils = struct {
                 .board_height = model.board_height,
                 .cell_aspect_ratio = model.cell_aspect_ratio,
                 .ticks_since_move = 0,
+                .message_overlay_region = model.message_overlay_region,
+                .background_sent = model.background_sent,
+                .background_cols = model.background_cols,
+                .background_rows = model.background_rows,
+                .dot_sprite_sent = model.dot_sprite_sent,
+                .dot_placed = model.dot_placed,
             } else .{
                 .mode = if (model.mode == .START) .PLAYING else model.mode,
                 .dot_col = model.dot_col,
@@ -116,6 +185,12 @@ pub const ModelUtils = struct {
                 .board_height = model.board_height,
                 .cell_aspect_ratio = model.cell_aspect_ratio,
                 .ticks_since_move = model.ticks_since_move,
+                .message_overlay_region = model.message_overlay_region,
+                .background_sent = model.background_sent,
+                .background_cols = model.background_cols,
+                .background_rows = model.background_rows,
+                .dot_sprite_sent = model.dot_sprite_sent,
+                .dot_placed = model.dot_placed,
             },
             .quit => .{
                 .mode = .QUIT,
@@ -126,6 +201,12 @@ pub const ModelUtils = struct {
                 .board_height = model.board_height,
                 .cell_aspect_ratio = model.cell_aspect_ratio,
                 .ticks_since_move = model.ticks_since_move,
+                .message_overlay_region = model.message_overlay_region,
+                .background_sent = model.background_sent,
+                .background_cols = model.background_cols,
+                .background_rows = model.background_rows,
+                .dot_sprite_sent = model.dot_sprite_sent,
+                .dot_placed = model.dot_placed,
             },
             .resized => |size| .{
                 .mode = model.mode,
@@ -136,6 +217,12 @@ pub const ModelUtils = struct {
                 .board_height = size.height,
                 .cell_aspect_ratio = size.cell_aspect_ratio,
                 .ticks_since_move = model.ticks_since_move,
+                .message_overlay_region = model.message_overlay_region,
+                .background_sent = model.background_sent,
+                .background_cols = model.background_cols,
+                .background_rows = model.background_rows,
+                .dot_sprite_sent = model.dot_sprite_sent,
+                .dot_placed = model.dot_placed,
             },
         };
     }
