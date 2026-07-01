@@ -97,7 +97,6 @@ pub const AppUtils = struct {
         try writer.writeAll("\x1b[?2026h");
         const cell_width = @max(1, @as(usize, @intFromFloat(@round(m.cell_aspect_ratio))));
         try drawBorder(writer, m, cell_width);
-        try drawBackground(writer, m, cell_width);
         try drawSprites(writer, m, cell_width);
         try writer.writeAll("\x1b[?2026l");
         try writer.flush();
@@ -120,15 +119,6 @@ pub const AppUtils = struct {
         try borderColor(writer, "╚");
         for (0..m.board_width * cell_width) |_| try borderColor(writer, "═");
         try borderColor(writer, "╝");
-    }
-
-    fn drawBackground(writer: *std.Io.Writer, m: model.Model, cell_width: usize) !void {
-        for (0..m.board_height) |row| {
-            try moveTo(writer, row + 1, 1);
-            for (0..m.board_width * cell_width) |_| {
-                try writer.writeAll("\x1b[2m\u{00b7}\x1b[0m");
-            }
-        }
     }
 
     fn drawSprites(writer: *std.Io.Writer, m: model.Model, cell_width: usize) !void {
