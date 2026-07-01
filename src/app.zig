@@ -82,25 +82,25 @@ pub const AppUtils = struct {
     }
 
     pub fn drawBoard(writer: *std.Io.Writer, m: model.Model) !void {
-        return switch (m.mode) {
-            .START => drawMessageScreen(writer, m, "Press any key to start"),
-            .GAME_OVER => drawMessageScreen(writer, m, "Game over - press any key to restart"),
-            else => drawPlayingBoard(writer, m),
+        const cell_width = @max(1, @as(usize, @intFromFloat(@round(m.cell_aspect_ratio))));
+        try writer.writeAll("\x1b[?2026h");
+        try clearInterior(writer, m, cell_width);
+        try switch (m.mode) {
+            .START => drawMessageScreen(writer, m, cell_width, "Press any key to start"),
+            .GAME_OVER => drawMessageScreen(writer, m, cell_width, "Game over - press any key to restart"),
+            else => drawPlayingBoard(writer, m, cell_width),
         };
+        try writer.writeAll("\x1b[?2026l");
+        try writer.flush();
     }
 
     fn moveTo(writer: *std.Io.Writer, row: usize, col: usize) !void {
         try writer.print("\x1b[{};{}H", .{ row + 1, col + 1 });
     }
 
-    fn drawPlayingBoard(writer: *std.Io.Writer, m: model.Model) !void {
-        try writer.writeAll("\x1b[?2026h");
-        const cell_width = @max(1, @as(usize, @intFromFloat(@round(m.cell_aspect_ratio))));
+    fn drawPlayingBoard(writer: *std.Io.Writer, m: model.Model, cell_width: usize) !void {
         try drawBorder(writer, m, cell_width);
-        try drawBackground(writer, m, cell_width);
         try drawSprites(writer, m, cell_width);
-        try writer.writeAll("\x1b[?2026l");
-        try writer.flush();
     }
 
     fn drawBorder(writer: *std.Io.Writer, m: model.Model, cell_width: usize) !void {
@@ -122,12 +122,10 @@ pub const AppUtils = struct {
         try borderColor(writer, "╝");
     }
 
-    fn drawBackground(writer: *std.Io.Writer, m: model.Model, cell_width: usize) !void {
+    fn clearInterior(writer: *std.Io.Writer, m: model.Model, cell_width: usize) !void {
         for (0..m.board_height) |row| {
             try moveTo(writer, row + 1, 1);
-            for (0..m.board_width * cell_width) |_| {
-                try writer.writeAll("\x1b[2m\u{00b7}\x1b[0m");
-            }
+            for (0..m.board_width * cell_width) |_| try writer.writeByte(' ');
         }
     }
 
@@ -151,22 +149,18 @@ pub const AppUtils = struct {
         return "║";
     }
 
-    fn drawMessageScreen(writer: *std.Io.Writer, m: model.Model, message: []const u8) !void {
+    fn drawMessageScreen(writer: *std.Io.Writer, m: model.Model, cell_width: usize, message: []const u8) !void {
         const box_height = 3;
         const box_width = message.len + 4;
-        const cell_width = @max(1, @as(usize, @intFromFloat(@round(m.cell_aspect_ratio))));
         const board_width = m.board_width * cell_width;
         const shadow_offset = 1;
         const box_top = 1 + (m.board_height -| box_height) / 2;
         const box_left = 1 + (board_width -| box_width) / 2;
 
-        try writer.writeAll("\x1b[?2026h");
         try drawMessageBorder(writer, m, board_width);
         try drawMessageShadow(writer, box_top, box_left, box_height, box_width, shadow_offset);
         try drawMessageBox(writer, box_top, box_left, box_height, box_width);
         try drawMessageText(writer, message, box_top, box_left);
-        try writer.writeAll("\x1b[?2026l");
-        try writer.flush();
     }
 
     fn drawMessageBorder(writer: *std.Io.Writer, m: model.Model, board_width: usize) !void {
