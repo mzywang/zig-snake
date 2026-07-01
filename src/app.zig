@@ -89,31 +89,51 @@ pub const AppUtils = struct {
         };
     }
 
-    fn drawPlayingBoard(writer: *std.Io.Writer, m: model.Model) !void {
-        try writer.writeAll("\x1b[H");
-        const cell_width = @max(1, @as(usize, @intFromFloat(@round(m.cell_aspect_ratio))));
-        const last_row = m.board_height + 1;
+    fn moveTo(writer: *std.Io.Writer, row: usize, col: usize) !void {
+        try writer.print("\x1b[{};{}H", .{ row + 1, col + 1 });
+    }
 
-        for (0..m.board_height + 2) |row| {
-            if (row == 0 or row == last_row) {
-                try borderColor(writer, if (row == 0) "╔" else "╚");
-                for (0..m.board_width * cell_width) |_| try borderColor(writer, "═");
-                try borderColor(writer, if (row == 0) "╗" else "╝");
-            } else {
-                const board_row = row - 1;
-                try borderColor(writer, "║");
-                for (0..m.board_width) |col| {
-                    const is_dot = board_row == m.dot_row and col == m.dot_col;
-                    for (0..cell_width) |_| {
-                        try writer.writeAll(if (is_dot) "\x1b[32;1m\u{2588}\x1b[0m" else "\x1b[2m\u{00b7}\x1b[0m");
-                    }
-                }
-                try borderColor(writer, "║");
-            }
-            if (row != last_row) try writer.writeByte('\n');
+    fn drawPlayingBoard(writer: *std.Io.Writer, m: model.Model) !void {
+        try writer.writeAll("\x1b[?2026h");
+        const cell_width = @max(1, @as(usize, @intFromFloat(@round(m.cell_aspect_ratio))));
+        try drawBorder(writer, m, cell_width);
+        try drawBackground(writer, m, cell_width);
+        try drawSprites(writer, m, cell_width);
+        try writer.writeAll("\x1b[?2026l");
+        try writer.flush();
+    }
+
+    fn drawBorder(writer: *std.Io.Writer, m: model.Model, cell_width: usize) !void {
+        try moveTo(writer, 0, 0);
+        try borderColor(writer, "╔");
+        for (0..m.board_width * cell_width) |_| try borderColor(writer, "═");
+        try borderColor(writer, "╗");
+
+        for (0..m.board_height) |row| {
+            try moveTo(writer, row + 1, 0);
+            try borderColor(writer, "║");
+            try moveTo(writer, row + 1, m.board_width * cell_width + 1);
+            try borderColor(writer, "║");
         }
 
-        try writer.flush();
+        try moveTo(writer, m.board_height + 1, 0);
+        try borderColor(writer, "╚");
+        for (0..m.board_width * cell_width) |_| try borderColor(writer, "═");
+        try borderColor(writer, "╝");
+    }
+
+    fn drawBackground(writer: *std.Io.Writer, m: model.Model, cell_width: usize) !void {
+        for (0..m.board_height) |row| {
+            try moveTo(writer, row + 1, 1);
+            for (0..m.board_width * cell_width) |_| {
+                try writer.writeAll("\x1b[2m\u{00b7}\x1b[0m");
+            }
+        }
+    }
+
+    fn drawSprites(writer: *std.Io.Writer, m: model.Model, cell_width: usize) !void {
+        try moveTo(writer, m.dot_row + 1, m.dot_col * cell_width + 1);
+        for (0..cell_width) |_| try writer.writeAll("\x1b[32;1m\u{2588}\x1b[0m");
     }
 
     fn borderColor(writer: *std.Io.Writer, glyph: []const u8) !void {
