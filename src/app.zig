@@ -130,8 +130,15 @@ pub const AppUtils = struct {
     }
 
     fn drawSprites(writer: *std.Io.Writer, m: model.Model, cell_width: usize) !void {
-        try moveTo(writer, m.dot_row + 1, m.dot_col * cell_width + 1);
-        for (0..cell_width) |_| try writer.writeAll("\x1b[32;1m\u{2588}\x1b[0m");
+        for (0..m.snake_len) |i| {
+            const seg = m.segments[(m.head_idx + i) % model.max_snake_len];
+            const color = if (i == 0) "\x1b[32;1m" else "\x1b[32m";
+            try moveTo(writer, seg.row + 1, seg.col * cell_width + 1);
+            for (0..cell_width) |_| {
+                try writer.writeAll(color);
+                try writer.writeAll("\u{2588}\x1b[0m");
+            }
+        }
     }
 
     fn borderColor(writer: *std.Io.Writer, glyph: []const u8) !void {
