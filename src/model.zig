@@ -12,10 +12,19 @@ pub const Direction = enum {
     right,
 };
 
+pub const Position = struct {
+    col: usize,
+    row: usize,
+};
+
+pub const max_snake_len: usize = 512;
+pub const initial_snake_len: usize = 3;
+
 pub const Model = struct {
     mode: Mode,
-    dot_col: usize,
-    dot_row: usize,
+    segments: [max_snake_len]Position,
+    head_idx: usize,
+    snake_len: usize,
     direction: Direction,
     board_width: usize,
     board_height: usize,
@@ -42,16 +51,21 @@ pub const Action = union(enum) {
 
 pub const ModelUtils = struct {
     pub fn initializeModel(initial_size: BoardSize) Model {
-        return .{
+        var m: Model = .{
             .mode = .START,
-            .dot_col = 0,
-            .dot_row = 0,
+            .segments = undefined,
+            .head_idx = 0,
+            .snake_len = initial_snake_len,
             .direction = .right,
             .board_width = initial_size.width,
             .board_height = initial_size.height,
             .cell_aspect_ratio = initial_size.cell_aspect_ratio,
             .ticks_since_move = 0,
         };
+        for (0..initial_snake_len) |i| {
+            m.segments[i] = .{ .col = initial_snake_len - 1 - i, .row = 0 };
+        }
+        return m;
     }
 
     fn hitsWall(position: usize, bound: usize, direction: Direction, forward: Direction, backward: Direction) bool {
@@ -73,69 +87,56 @@ pub const ModelUtils = struct {
 
                 const ticks_since_move = model.ticks_since_move + 1;
                 const ticks_per_move = @max(1, 1000 / (blocks_per_second * @as(usize, @intCast(tick_rate_ms))));
-                if (ticks_since_move < ticks_per_move) break :blk .{
-                    .mode = model.mode,
-                    .dot_col = model.dot_col,
-                    .dot_row = model.dot_row,
-                    .direction = model.direction,
-                    .board_width = model.board_width,
-                    .board_height = model.board_height,
-                    .cell_aspect_ratio = model.cell_aspect_ratio,
-                    .ticks_since_move = ticks_since_move,
-                };
+                if (ticks_since_move < ticks_per_move) {
+                    var m = model;
+                    m.ticks_since_move = ticks_since_move;
+                    break :blk m;
+                }
 
-                const hit_wall = hitsWall(model.dot_col, model.board_width, model.direction, .right, .left) or
-                    hitsWall(model.dot_row, model.board_height, model.direction, .down, .up);
+                const head = model.segments[model.head_idx];
+                const hit_wall = hitsWall(head.col, model.board_width, model.direction, .right, .left) or
+                    hitsWall(head.row, model.board_height, model.direction, .down, .up);
 
-                break :blk .{
-                    .mode = if (hit_wall) .GAME_OVER else model.mode,
-                    .dot_col = if (hit_wall) model.dot_col else advance(model.dot_col, model.direction, .right, .left),
-                    .dot_row = if (hit_wall) model.dot_row else advance(model.dot_row, model.direction, .down, .up),
-                    .direction = model.direction,
-                    .board_width = model.board_width,
-                    .board_height = model.board_height,
-                    .cell_aspect_ratio = model.cell_aspect_ratio,
-                    .ticks_since_move = 0,
+                if (hit_wall) {
+                    var m = model;
+                    m.mode = .GAME_OVER;
+                    break :blk m;
+                }
+
+                const new_head_idx = (model.head_idx + max_snake_len - 1) % max_snake_len;
+                var m = model;
+                m.segments[new_head_idx] = .{
+                    .col = advance(head.col, model.direction, .right, .left),
+                    .row = advance(head.row, model.direction, .down, .up),
                 };
+                m.head_idx = new_head_idx;
+                m.ticks_since_move = 0;
+                break :blk m;
             },
-            .key_pressed => |direction| if (model.mode == .GAME_OVER) .{
-                .mode = .PLAYING,
-                .dot_col = 0,
-                .dot_row = 0,
-                .direction = .right,
-                .board_width = model.board_width,
-                .board_height = model.board_height,
-                .cell_aspect_ratio = model.cell_aspect_ratio,
-                .ticks_since_move = 0,
-            } else .{
-                .mode = if (model.mode == .START) .PLAYING else model.mode,
-                .dot_col = model.dot_col,
-                .dot_row = model.dot_row,
-                .direction = direction orelse model.direction,
-                .board_width = model.board_width,
-                .board_height = model.board_height,
-                .cell_aspect_ratio = model.cell_aspect_ratio,
-                .ticks_since_move = model.ticks_since_move,
+            .key_pressed => |direction| blk: {
+                if (model.mode == .GAME_OVER) {
+                    var m = initializeModel(.{ .width = model.board_width, .height = model.board_height, .cell_aspect_ratio = model.cell_aspect_ratio });
+                    m.mode = .PLAYING;
+                    break :blk m;
+                }
+                var m = model;
+                m.mode = if (model.mode == .START) .PLAYING else model.mode;
+                m.direction = direction orelse model.direction;
+                break :blk m;
             },
-            .quit => .{
-                .mode = .QUIT,
-                .dot_col = model.dot_col,
-                .dot_row = model.dot_row,
-                .direction = model.direction,
-                .board_width = model.board_width,
-                .board_height = model.board_height,
-                .cell_aspect_ratio = model.cell_aspect_ratio,
-                .ticks_since_move = model.ticks_since_move,
+            .quit => blk: {
+                var m = model;
+                m.mode = .QUIT;
+                break :blk m;
             },
-            .resized => |size| .{
-                .mode = model.mode,
-                .dot_col = model.dot_col % size.width,
-                .dot_row = model.dot_row % size.height,
-                .direction = model.direction,
-                .board_width = size.width,
-                .board_height = size.height,
-                .cell_aspect_ratio = size.cell_aspect_ratio,
-                .ticks_since_move = model.ticks_since_move,
+            .resized => |size| blk: {
+                var m = model;
+                m.board_width = size.width;
+                m.board_height = size.height;
+                m.cell_aspect_ratio = size.cell_aspect_ratio;
+                const head = m.segments[m.head_idx];
+                m.segments[m.head_idx] = .{ .col = head.col % size.width, .row = head.row % size.height };
+                break :blk m;
             },
         };
     }
