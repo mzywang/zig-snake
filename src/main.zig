@@ -9,7 +9,8 @@ pub fn main(init: std.process.Init) !void {
     const original_termios = try app.AppUtils.enterRawMode();
     defer app.AppUtils.exitRawMode(original_termios);
 
-    var app_session: app.AppUtils.Session = .{ .model = model.ModelUtils.initializeModel(app.AppUtils.queryBoardSize()), .stdout = .{} };
+    const seed: u64 = @truncate(@as(u96, @bitCast(std.Io.Clock.Timestamp.now(init.io, .awake).raw.nanoseconds)));
+    var app_session: app.AppUtils.Session = .{ .model = model.ModelUtils.initializeModel(app.AppUtils.queryBoardSize(), seed), .stdout = .{} };
     const stdout_writer = app_session.stdout.setup(init.io);
 
     try app.AppUtils.enterAlternateScreen(stdout_writer);
