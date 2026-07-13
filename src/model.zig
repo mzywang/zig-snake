@@ -1,3 +1,5 @@
+const std = @import("std");
+
 pub const Mode = enum {
     START,
     PLAYING,
@@ -19,6 +21,7 @@ pub const Position = struct {
 
 pub const max_snake_len: usize = 512;
 pub const initial_snake_len: usize = 3;
+pub const food_growth: usize = 3;
 
 pub const Model = struct {
     mode: Mode,
@@ -30,6 +33,9 @@ pub const Model = struct {
     board_height: usize,
     cell_aspect_ratio: f64,
     ticks_since_move: usize,
+    food: Position,
+    pending_growth: usize,
+    rng: std.Random.DefaultPrng,
 };
 
 pub const tick_rate_ms: i64 = 16;
@@ -50,7 +56,7 @@ pub const Action = union(enum) {
 };
 
 pub const ModelUtils = struct {
-    pub fn initializeModel(initial_size: BoardSize) Model {
+    pub fn initializeModel(initial_size: BoardSize, seed: u64) Model {
         var m: Model = .{
             .mode = .START,
             .segments = undefined,
@@ -61,11 +67,36 @@ pub const ModelUtils = struct {
             .board_height = initial_size.height,
             .cell_aspect_ratio = initial_size.cell_aspect_ratio,
             .ticks_since_move = 0,
+            .food = undefined,
+            .pending_growth = 0,
+            .rng = .init(seed),
         };
         for (0..initial_snake_len) |i| {
             m.segments[i] = .{ .col = initial_snake_len - 1 - i, .row = 0 };
         }
+        m.food = spawnFood(&m);
         return m;
+    }
+
+    fn snakeOccupies(m: Model, pos: Position) bool {
+        for (0..m.snake_len) |i| {
+            const seg = m.segments[(m.head_idx + i) % max_snake_len];
+            if (seg.col == pos.col and seg.row == pos.row) return true;
+        }
+        return false;
+    }
+
+    fn spawnFood(m: *Model) Position {
+        const rng = m.rng.random();
+        var attempts: usize = 0;
+        while (attempts < 1000) : (attempts += 1) {
+            const pos: Position = .{
+                .col = rng.intRangeLessThan(usize, 0, m.board_width),
+                .row = rng.intRangeLessThan(usize, 0, m.board_height),
+            };
+            if (!snakeOccupies(m.*, pos)) return pos;
+        }
+        return .{ .col = 0, .row = 0 };
     }
 
     fn hitsWall(position: usize, bound: usize, direction: Direction, forward: Direction, backward: Direction) bool {
@@ -104,18 +135,30 @@ pub const ModelUtils = struct {
                 }
 
                 const new_head_idx = (model.head_idx + max_snake_len - 1) % max_snake_len;
-                var m = model;
-                m.segments[new_head_idx] = .{
+                const new_head: Position = .{
                     .col = advance(head.col, model.direction, .right, .left),
                     .row = advance(head.row, model.direction, .down, .up),
                 };
+                var m = model;
+                m.segments[new_head_idx] = new_head;
                 m.head_idx = new_head_idx;
                 m.ticks_since_move = 0;
+
+                if (m.pending_growth > 0 and m.snake_len < max_snake_len) {
+                    m.snake_len += 1;
+                    m.pending_growth -= 1;
+                }
+
+                if (new_head.col == m.food.col and new_head.row == m.food.row) {
+                    m.pending_growth += food_growth;
+                    m.food = spawnFood(&m);
+                }
                 break :blk m;
             },
             .key_pressed => |direction| blk: {
                 if (model.mode == .GAME_OVER) {
-                    var m = initializeModel(.{ .width = model.board_width, .height = model.board_height, .cell_aspect_ratio = model.cell_aspect_ratio });
+                    var rng = model.rng;
+                    var m = initializeModel(.{ .width = model.board_width, .height = model.board_height, .cell_aspect_ratio = model.cell_aspect_ratio }, rng.next());
                     m.mode = .PLAYING;
                     break :blk m;
                 }
@@ -136,6 +179,7 @@ pub const ModelUtils = struct {
                 m.cell_aspect_ratio = size.cell_aspect_ratio;
                 const head = m.segments[m.head_idx];
                 m.segments[m.head_idx] = .{ .col = head.col % size.width, .row = head.row % size.height };
+                m.food = .{ .col = m.food.col % size.width, .row = m.food.row % size.height };
                 break :blk m;
             },
         };

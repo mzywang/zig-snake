@@ -100,7 +100,15 @@ pub const AppUtils = struct {
 
     fn drawPlayingBoard(writer: *std.Io.Writer, m: model.Model, cell_width: usize) !void {
         try drawBorder(writer, m, cell_width);
+        try drawFood(writer, m, cell_width);
         try drawSprites(writer, m, cell_width);
+    }
+
+    fn drawFood(writer: *std.Io.Writer, m: model.Model, cell_width: usize) !void {
+        try moveTo(writer, m.food.row + 1, m.food.col * cell_width + 1);
+        for (0..cell_width) |_| {
+            try writer.writeAll("\x1b[31;1m\u{2588}\x1b[0m");
+        }
     }
 
     fn drawBorder(writer: *std.Io.Writer, m: model.Model, cell_width: usize) !void {
